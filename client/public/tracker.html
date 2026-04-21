@@ -191,7 +191,7 @@
 
   async function sendLocation(lat, lng, accuracy, speed) {
     const id  = document.getElementById('deviceId').value.trim() || 'TRANSPORT-001';
-    const url = document.getElementById('serverUrl').value.trim();
+    const url = document.getElementById('serverUrl').value.trim().replace(/\/+$/, '');
     if (!url) { setState('Enter server URL', 'error'); return; }
 
     litFlow('s-gps');
