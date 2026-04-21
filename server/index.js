@@ -14,12 +14,16 @@ const SIMULATION_INTERVAL_MS = parseInt(process.env.SIMULATION_INTERVAL_MS, 10) 
 const app = express();
 const httpServer = http.createServer(app);
 
+const ALLOWED_ORIGINS = CLIENT_ORIGIN === '*'
+  ? true  // allow all
+  : CLIENT_ORIGIN.split(',').map(o => o.trim());
+
 const io = new Server(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: { origin: ALLOWED_ORIGINS, methods: ['GET', 'POST'] },
 });
 
-// Allow all origins (mobile on same WiFi needs this)
-app.use(cors({ origin: '*' }));
+// Allow configured origins (mobile on same WiFi needs this)
+app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json());
 
 // Attach io to every request so controllers can emit
