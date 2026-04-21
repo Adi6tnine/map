@@ -1,29 +1,10 @@
-// In-memory device store — seeded once on startup
+// In-memory device store — starts empty, populated by real devices only
 
-const TYPES = ['Excavator', 'Drone', 'Transport', 'Harvester', 'Sensor Node'];
-const BASE_LAT = 33.74;
-const BASE_LNG = -118.26;
-
-function createInitialDevices() {
-  return Array.from({ length: 12 }, (_, i) => ({
-    id: `EQ-${String(i + 1).padStart(3, '0')}`,
-    type: TYPES[i % TYPES.length],
-    lat: BASE_LAT + (Math.random() - 0.5) * 0.05,
-    lng: BASE_LNG + (Math.random() - 0.5) * 0.05,
-    battery: Math.floor(10 + Math.random() * 90),
-    status: 'idle',
-    isMoving: Math.random() > 0.3,
-    lastActive: Date.now() - Math.floor(Math.random() * 5000),
-    source: 'simulated', // 'simulated' | 'mobile' | 'esp32'
-  }));
-}
-
-// Singleton store
-const devices = createInitialDevices();
+const devices = [];
 
 /**
  * Upsert a device by id.
- * If it doesn't exist yet (e.g. first ping from mobile/ESP32), create it.
+ * Creates it on first ping from mobile/ESP32.
  */
 function upsertDevice(id, fields) {
   const idx = devices.findIndex(d => d.id === id);
@@ -31,13 +12,12 @@ function upsertDevice(id, fields) {
     Object.assign(devices[idx], fields, { lastActive: Date.now() });
     return devices[idx];
   }
-  // New device (mobile or ESP32 not in initial list)
   const newDevice = {
     id,
     type: fields.type || 'Mobile',
-    lat: fields.lat || BASE_LAT,
-    lng: fields.lng || BASE_LNG,
-    battery: fields.battery ?? 100,
+    lat: fields.lat,
+    lng: fields.lng,
+    battery: fields.battery ?? null,
     status: 'active',
     isMoving: true,
     lastActive: Date.now(),

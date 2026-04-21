@@ -1,70 +1,50 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getStatusConfig } from '../utils/statusConfig';
 
-// Smooth marker movement using CSS transitions
-function buildMarkerHtml(device, isFocused, isHovered) {
-  const config = getStatusConfig(device.status);
-  const scale  = isFocused ? 1.5 : isHovered ? 1.2 : 1;
-  const shadow  = isFocused
-    ? '0 0 0 5px rgba(37,99,235,0.3), 0 2px 8px rgba(0,0,0,0.3)'
-    : '0 2px 6px rgba(0,0,0,0.25)';
+function buildMarkerHtml(device, isFocused) {
+  const pulse = device.source === 'mobile' || device.source === 'esp8266';
+  const size = isFocused ? 28 : 22;
+  const color = pulse ? '#2563EB' : '#6b7280';
 
-  if (device.source === 'mobile' || device.source === 'esp32') {
+  if (pulse) {
     return `
-      <div style="position:relative;width:24px;height:24px;transform:scale(${scale});transition:transform 0.2s ease;">
-        <div style="
-          position:absolute;inset:0;border-radius:50%;
-          background:rgba(37,99,235,0.15);
-          animation:ripple 2s ease-out infinite;
-        "></div>
-        <div style="
-          position:absolute;inset:4px;border-radius:50%;
-          background:#2563EB;border:2.5px solid #fff;
-          box-shadow:${shadow};
-        "></div>
+      <div style="position:relative;width:${size}px;height:${size}px;">
+        <div style="position:absolute;inset:0;border-radius:50%;background:rgba(37,99,235,0.2);animation:ripple 1.8s ease-out infinite;"></div>
+        <div style="position:absolute;inset:0;border-radius:50%;background:rgba(37,99,235,0.1);animation:ripple 1.8s ease-out 0.6s infinite;"></div>
+        <div style="position:absolute;inset:${isFocused ? 5 : 4}px;border-radius:50%;background:#2563EB;border:2.5px solid #fff;box-shadow:0 2px 8px rgba(37,99,235,0.5);"></div>
       </div>
       <style>
-        @keyframes ripple {
-          0%   { transform:scale(0.8); opacity:0.8; }
-          100% { transform:scale(2.2); opacity:0; }
-        }
+        @keyframes ripple{0%{transform:scale(0.8);opacity:0.9}100%{transform:scale(2.5);opacity:0}}
       </style>`;
   }
 
-  return `
-    <div style="
-      width:14px;height:14px;border-radius:50%;
-      background:${config.color};border:2.5px solid #fff;
-      box-shadow:${shadow};
-      transform:scale(${scale});transition:transform 0.2s ease;
-    "></div>`;
+  return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.25);"></div>`;
 }
 
 export default function MapView({ devices, focusedDevice, setFocusedDevice }) {
-  const mapRef      = useRef(null);
-  const markersRef  = useRef({});
-  const pathsRef    = useRef({});       // polyline trails for mobile devices
-  const coordsRef   = useRef({});       // history of coords per device
-  const [mapReady, setMapReady]     = useState(false);
-  const [hoveredDevice, setHoveredDevice] = useState(null);
-  const autoFollowRef = useRef(true);   // auto-follow mobile device until user pans
+  const mapRef     = useRef(null);
+  const markersRef = useRef({});
+  const pathRef    = useRef(null);
+  const coordsRef  = useRef([]);
+  const [mapReady, setMapReady] = useState(false);
+  const autoFollowRef = useRef(true);
+  const initializedRef = useRef(false);
 
-  // Load Leaflet once
+  // Load Leaflet
   useEffect(() => {
     if (window.L) { setMapReady(true); return; }
     const link = document.createElement('link');
-    link.rel  = 'stylesheet';
+    link.rel = 'stylesheet';
     link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
     document.head.appendChild(link);
-
     const script = document.createElement('script');
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
     script.onload = () => setMapReady(true);
     document.head.appendChild(script);
   }, []);
 
-  // Init map — use real OpenStreetMap tiles
+  // Init map
   useEffect(() => {
     if (!mapReady) return;
     const container = document.getElementById('leaflet-map');
@@ -73,153 +53,172 @@ export default function MapView({ devices, focusedDevice, setFocusedDevice }) {
     const map = window.L.map('leaflet-map', {
       zoomControl: false,
       attributionControl: true,
-    }).setView([20.5937, 78.9629], 5); // India default — will jump to real GPS on first ping
+    }).setView([20.5937, 78.9629], 5);
 
-    // Real OpenStreetMap tiles
     window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19,
     }).addTo(map);
 
-    // Custom zoom control position
     window.L.control.zoom({ position: 'bottomright' }).addTo(map);
-
-    // Stop auto-follow when user manually pans
     map.on('dragstart', () => { autoFollowRef.current = false; });
 
     mapRef.current = map;
-
     return () => {
       map.remove();
-      mapRef.current  = null;
+      mapRef.current = null;
       markersRef.current = {};
-      pathsRef.current   = {};
-      coordsRef.current  = {};
+      pathRef.current = null;
+      coordsRef.current = [];
+      initializedRef.current = false;
     };
   }, [mapReady]);
 
-  // Sync markers + trails on every device update
+  // Sync markers on device update
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     const map = mapRef.current;
 
-    devices.forEach((device) => {
-      const isFocused = focusedDevice === device.id;
-      const isHovered = hoveredDevice === device.id;
-      const config    = getStatusConfig(device.status);
-      const isReal    = device.source === 'mobile' || device.source === 'esp32';
+    // Remove markers for devices no longer in list
+    Object.keys(markersRef.current).forEach(id => {
+      if (!devices.find(d => d.id === id)) {
+        markersRef.current[id].remove();
+        delete markersRef.current[id];
+      }
+    });
 
-      // ── Marker ──────────────────────────────────────────
+    devices.forEach((device) => {
+      if (!device.lat || !device.lng) return;
+
+      const isFocused = focusedDevice === device.id;
+      const config = getStatusConfig(device.status);
+      const isReal = device.source === 'mobile' || device.source === 'esp8266';
+
       const icon = window.L.divIcon({
         className: 'custom-leaflet-icon',
-        html: buildMarkerHtml(device, isFocused, isHovered),
-        iconSize:   [24, 24],
-        iconAnchor: [12, 12],
+        html: buildMarkerHtml(device, isFocused),
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
       });
 
       let marker = markersRef.current[device.id];
       if (!marker) {
-        marker = window.L.marker([device.lat, device.lng], { icon, zIndexOffset: isReal ? 1000 : 0 })
-          .addTo(map);
-        marker.on('click',     () => setFocusedDevice(device.id));
-        marker.on('mouseover', () => setHoveredDevice(device.id));
-        marker.on('mouseout',  () => setHoveredDevice(null));
+        marker = window.L.marker([device.lat, device.lng], {
+          icon,
+          zIndexOffset: isReal ? 1000 : 0,
+        }).addTo(map);
+        marker.on('click', () => setFocusedDevice(device.id));
         markersRef.current[device.id] = marker;
       } else {
         marker.setLatLng([device.lat, device.lng]);
         marker.setIcon(icon);
       }
 
-      // ── Popup ────────────────────────────────────────────
+      // Popup on focus
       if (isFocused) {
         const srcLabel = device.source === 'mobile' ? '📱 Mobile GPS'
-                       : device.source === 'esp32'  ? '🔌 ESP32'
-                       : '🤖 Simulated';
+                       : device.source === 'esp8266' ? '🔌 ESP8266'
+                       : '🔌 ESP32';
         marker.bindPopup(`
-          <div style="font-family:system-ui,sans-serif;min-width:170px;padding:2px 0;">
+          <div style="font-family:system-ui,sans-serif;min-width:180px;padding:2px 0;">
             <div style="font-weight:700;font-size:14px;color:#111;">${device.id}</div>
             <div style="font-size:12px;color:#666;margin:2px 0 8px;">${device.type} · ${srcLabel}</div>
             <div style="display:flex;justify-content:space-between;border-top:1px solid #eee;padding-top:8px;">
               <span style="font-size:12px;font-weight:600;color:${config.color};">${config.label}</span>
-              <span style="font-size:12px;color:#666;">🔋 ${device.battery?.toFixed(0) ?? '—'}%</span>
+              <span style="font-size:12px;color:#666;">🔋 ${device.battery != null ? device.battery.toFixed(0) + '%' : '—'}</span>
             </div>
             <div style="font-size:11px;color:#999;margin-top:6px;font-family:monospace;">
-              ${device.lat?.toFixed(5) ?? '—'}, ${device.lng?.toFixed(5) ?? '—'}
+              ${device.lat.toFixed(6)}, ${device.lng.toFixed(6)}
             </div>
           </div>
-        `, { offset: [0, -8] }).openPopup();
+        `, { offset: [0, -10] }).openPopup();
       } else {
         marker.closePopup();
         marker.unbindPopup();
       }
 
-      // ── Trail (only for real GPS devices) ───────────────
+      // GPS trail for real device
       if (isReal) {
-        if (!coordsRef.current[device.id]) coordsRef.current[device.id] = [];
-        const history = coordsRef.current[device.id];
-        const last    = history[history.length - 1];
+        const history = coordsRef.current;
+        const last = history[history.length - 1];
+        const moved = !last || Math.abs(last[0] - device.lat) > 0.000005 || Math.abs(last[1] - device.lng) > 0.000005;
 
-        // Only push if moved more than ~1m
-        if (!last || Math.abs(last[0] - device.lat) > 0.00001 || Math.abs(last[1] - device.lng) > 0.00001) {
+        if (moved) {
           history.push([device.lat, device.lng]);
-          if (history.length > 120) history.shift(); // keep last 120 points
+          if (history.length > 200) history.shift();
         }
 
-        if (pathsRef.current[device.id]) {
-          pathsRef.current[device.id].setLatLngs(history);
-        } else {
-          pathsRef.current[device.id] = window.L.polyline(history, {
+        if (pathRef.current) {
+          pathRef.current.setLatLngs(history);
+        } else if (history.length > 1) {
+          pathRef.current = window.L.polyline(history, {
             color: '#2563EB',
             weight: 3,
-            opacity: 0.6,
-            dashArray: '6, 4',
+            opacity: 0.7,
+            dashArray: '8, 5',
             lineJoin: 'round',
           }).addTo(map);
+        }
+
+        // Fly to first real GPS fix
+        if (!initializedRef.current) {
+          map.flyTo([device.lat, device.lng], 17, { duration: 1.5 });
+          initializedRef.current = true;
+          autoFollowRef.current = true;
+        }
+
+        // Auto-follow
+        if (autoFollowRef.current && !focusedDevice) {
+          map.panTo([device.lat, device.lng], { animate: true, duration: 0.5 });
         }
       }
     });
 
-    // ── Auto-follow real device ──────────────────────────
-    const realDevice = devices.find(d => d.source === 'mobile' || d.source === 'esp32');
-    if (realDevice && autoFollowRef.current && !focusedDevice) {
-      map.setView([realDevice.lat, realDevice.lng], Math.max(map.getZoom(), 15), {
-        animate: true,
-        duration: 0.8,
-      });
-    }
-
-    // ── Fly to focused device ────────────────────────────
+    // Fly to focused device
     if (focusedDevice) {
       const d = devices.find(x => x.id === focusedDevice);
-      if (d) map.flyTo([d.lat, d.lng], 17, { duration: 1, easeLinearity: 0.3 });
+      if (d?.lat && d?.lng) {
+        map.flyTo([d.lat, d.lng], 18, { duration: 1, easeLinearity: 0.25 });
+      }
     }
-  }, [devices, mapReady, focusedDevice, hoveredDevice]);
+  }, [devices, mapReady, focusedDevice]);
+
+  const realDevice = devices.find(d => d.source === 'mobile' || d.source === 'esp8266');
 
   return (
     <section className="flex-1 relative">
       <div id="leaflet-map" className="w-full h-full" />
 
-      {/* Re-center button — appears after user pans away */}
-      <button
-        onClick={() => { autoFollowRef.current = true; }}
-        className="absolute top-4 right-4 z-[1000] bg-white border border-gray-200 shadow-md rounded-lg px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 transition-colors"
-      >
-        <span>📍</span> Re-center
-      </button>
+      {/* Re-center */}
+      {realDevice && (
+        <button
+          onClick={() => { autoFollowRef.current = true; }}
+          className="absolute top-4 right-4 z-[1000] bg-white border border-gray-200 shadow-md rounded-lg px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 transition-colors"
+        >
+          📍 Follow
+        </button>
+      )}
+
+      {/* No devices placeholder */}
+      {devices.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center z-[1000] pointer-events-none">
+          <div className="bg-white/90 backdrop-blur-sm border border-gray-200 rounded-2xl shadow-lg px-6 py-5 text-center max-w-xs">
+            <div className="text-3xl mb-2">📡</div>
+            <p className="text-sm font-semibold text-gray-800">Waiting for devices</p>
+            <p className="text-xs text-gray-500 mt-1">Open tracker.html on your phone to start tracking</p>
+          </div>
+        </div>
+      )}
 
       {/* Legend */}
       <div className="absolute bottom-10 left-4 z-[1000] bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-md px-3 py-2.5 flex flex-col gap-1.5 text-xs text-gray-600">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-blue-600 ring-2 ring-blue-200" />
-          <span>Live GPS (real)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-gray-400" />
-          <span>Simulated</span>
+          <span>Live GPS</span>
         </div>
         <div className="flex items-center gap-1.5">
           <div className="w-5 border-t-2 border-dashed border-blue-500" />
-          <span>GPS trail</span>
+          <span>Trail</span>
         </div>
       </div>
 
