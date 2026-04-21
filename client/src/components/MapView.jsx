@@ -141,10 +141,10 @@ export default function MapView({ devices, focusedDevice, setFocusedDevice }) {
             <div style="font-size:12px;color:#666;margin:2px 0 8px;">${device.type} · ${srcLabel}</div>
             <div style="display:flex;justify-content:space-between;border-top:1px solid #eee;padding-top:8px;">
               <span style="font-size:12px;font-weight:600;color:${config.color};">${config.label}</span>
-              <span style="font-size:12px;color:#666;">🔋 ${device.battery.toFixed(0)}%</span>
+              <span style="font-size:12px;color:#666;">🔋 ${device.battery?.toFixed(0) ?? '—'}%</span>
             </div>
             <div style="font-size:11px;color:#999;margin-top:6px;font-family:monospace;">
-              ${device.lat.toFixed(5)}, ${device.lng.toFixed(5)}
+              ${device.lat?.toFixed(5) ?? '—'}, ${device.lng?.toFixed(5) ?? '—'}
             </div>
           </div>
         `, { offset: [0, -8] }).openPopup();

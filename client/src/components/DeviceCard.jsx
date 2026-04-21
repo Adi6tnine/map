@@ -66,13 +66,13 @@ export default function DeviceCard({ device, isFocused, onSelect, onHover, onHov
         <div className="flex items-center gap-1.5 text-gray-500">
           <MapPin className="w-3.5 h-3.5" />
           <span className="text-xs font-mono">
-            {device.lat.toFixed(4)}, {device.lng.toFixed(4)}
+            {device.lat?.toFixed(4) ?? '—'}, {device.lng?.toFixed(4) ?? '—'}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          <BatteryIcon level={device.battery} />
-          <span className={`text-xs font-medium ${device.battery < 20 ? 'text-red-600' : 'text-gray-600'}`}>
-            {device.battery.toFixed(0)}%
+          <BatteryIcon level={device.battery ?? 0} />
+          <span className={`text-xs font-medium ${(device.battery ?? 100) < 20 ? 'text-red-600' : 'text-gray-600'}`}>
+            {device.battery != null ? device.battery.toFixed(0) : '—'}%
           </span>
         </div>
       </div>

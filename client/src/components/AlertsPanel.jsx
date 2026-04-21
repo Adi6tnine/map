@@ -32,7 +32,7 @@ export default function AlertsPanel({ alerts }) {
                 </div>
                 <div className={`text-xs mt-0.5 ${isCritical ? 'text-red-600' : 'text-amber-600'}`}>
                   {isCritical
-                    ? `Battery Critical (${alert.battery.toFixed(0)}%)`
+                    ? `Battery Critical (${alert.battery?.toFixed(0) ?? '—'}%)`
                     : `Idle warning (>15 mins)`}
                 </div>
               </div>
